@@ -173,17 +173,20 @@ static int rproxy_recv_dict(idevice_connection_t connection, plist_t * dict, uns
 
 	/* Read the size of the plist buffer */
 	if (IDEVICE_E_SUCCESS != idevice_connection_receive_all(connection, (char *)&dict_length, sizeof(dict_length), timeout)) {
+		error("ERROR: Failed to receive plist size\n");
 		goto cleanup;
 	} 
 
 	/* Allocate a buffer for the plist */
 	content = (char*)malloc(dict_length);
 	if (NULL == content) {
+		error("ERROR: Out of memory\n");
 		goto cleanup;
 	}
 
 	/* Read the plist */
 	if (IDEVICE_E_SUCCESS != idevice_connection_receive_all(connection, content, dict_length, timeout)) {
+		error("ERROR: Failed to receive plist data\n");
 		goto cleanup;
 	} 
 
@@ -191,6 +194,9 @@ static int rproxy_recv_dict(idevice_connection_t connection, plist_t * dict, uns
 	plist_from_bin(content, dict_length, dict);
 	if (*dict) {
 		res = 0;
+	}
+	else {
+		error("ERROR: Failed to parse the recieved plist\n");
 	}
 
 cleanup:
@@ -246,17 +252,20 @@ static int handle_connect_msg(control_thread_context_t * context)
 													  context->connection_port, 
 													  CLIENT_CONNECTION_START_STRING, 
 													  &client_connection)) {
+		error("ERROR: Failed to connect to connection port\n");
 		goto cleanup;
 	}
 
 	plist_t dict = NULL;
 	if (0 != rproxy_recv_dict(client_connection, &dict, RPROXY_RECV_TIMEOUT)) {
+		error("ERROR: Failed receive connection protocol's dict\n");
 		goto cleanup;
 	}
 
 	/* Parse the connection protocol version from the response */
 	uint64_t conn_protocol_ver = 0;
 	if (get_plist_uint_val(dict, "ConnProtoVersion", &conn_protocol_ver) < 0) {
+		error("ERROR: Invalid connection protocol plist\n");
 		goto cleanup;
 	}
 	if (RPROXY_CONNECTION_PROTOCOL_VERSION != conn_protocol_ver) {
@@ -269,6 +278,7 @@ static int handle_connect_msg(control_thread_context_t * context)
 	
 	/* Create a new socks client for the connection (and start handling the new connection) */
 	if (0 != socks5_add_client_socket(context->ev_base, client_connection)) {
+		error("ERROR: Failed to initialize socks client\n");
 		goto cleanup;
 	}
 
@@ -328,9 +338,15 @@ static void rproxy_control_read_cb(struct bufferevent * bev, void * arg)
 
 static void rproxy_control_event_cb(struct bufferevent *bev, short what, void *arg)
 {
-	debug("rproxy_control_event_cb %d", what);
-
-	/* TODO */
+	if (what & BEV_EVENT_TIMEOUT) {
+		error("ERROR: A timeout has occurred on the proxy's control connection\n");
+	}
+	if (what & BEV_EVENT_EOF) {	
+		debug("proxy's control connection was closed");
+	}
+	if (what & BEV_EVENT_ERROR) {
+		error("ERROR: An error has occured on the proxy's control connection\n");
+	}
 }
 
 static int create_control_socket_event(struct event_base * base, control_thread_context_t * context, struct bufferevent ** control_event)
