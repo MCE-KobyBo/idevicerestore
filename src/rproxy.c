@@ -291,7 +291,7 @@ cleanup:
 	return -1;
 }
 
-static void libevent_logcb(int severity, const char * msg)
+static void libevent_log_cb(int severity, const char * msg)
 {
 	const char * level = "?";
     switch (severity) {
@@ -305,7 +305,7 @@ static void libevent_logcb(int severity, const char * msg)
 	debug("libevent [%s] - %s\n", level, msg);
 }
 
-static void libevent_fatalcb(int err)
+static void libevent_fatal_cb(int err)
 {
 	error("ERROR: libevent fatal error %d", err);
 
@@ -513,8 +513,8 @@ int rproxy_start(idevice_t device, rproxy_client_t * client)
 #endif
 
 	/* Initialize libevent */
-	event_set_fatal_callback(libevent_fatalcb);
-	event_set_log_callback(libevent_logcb);
+	event_set_fatal_callback(libevent_fatal_cb);
+	event_set_log_callback(libevent_log_cb);
 #ifdef WIN32
 	if (0 != evthread_use_windows_threads()){
 		error("ERROR: Failed to initialize libevent's threading support\n");
