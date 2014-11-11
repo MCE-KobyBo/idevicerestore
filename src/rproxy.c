@@ -414,6 +414,8 @@ cleanup:
 
 static int rproxy_connect_control_service(idevice_t device, idevice_connection_t * control_connection, uint16_t * connection_port)
 {
+	plist_t dict = NULL;
+
 	/* Connect to the proxy service */
 	idevice_connection_t new_connection = NULL;
 	if (IDEVICE_E_SUCCESS != rproxy_create_connection(device, REVERSE_PROXY_MUX_PORT, CONTROL_CONNECTION_START_STRING, &new_connection)) {
@@ -422,7 +424,7 @@ static int rproxy_connect_control_service(idevice_t device, idevice_connection_t
 	}
 
 	/* Send the BeginCtrl command */
-	plist_t dict = plist_new_dict();
+	dict = plist_new_dict();
 	plist_dict_set_item(dict, "Command", plist_new_string("BeginCtrl"));
 	plist_dict_set_item(dict, "CtrlProtoVersion", plist_new_uint(RPROXY_CONTROL_PROTOCOL_VERSION));
 	
