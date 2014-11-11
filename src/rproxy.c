@@ -326,7 +326,7 @@ static void rproxy_control_read_cb(struct bufferevent * bev, void * arg)
 		return;
 	}
 
-	evbuffer_copyout(buffer, &command, sizeof(command));
+	evbuffer_remove(buffer, &command, sizeof(command));
 
 	if (CONTROL_MSG_CONNECT == command) {
 		handle_connect_msg(context);
