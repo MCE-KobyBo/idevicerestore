@@ -37,6 +37,7 @@
 #include "ipsw.h"
 #include "restore.h"
 #include "common.h"
+#include "rproxy.h"
 
 #define WAIT_FOR_STORAGE       11
 #define CREATE_PARTITION_MAP   12
@@ -1654,6 +1655,7 @@ int restore_device(struct idevicerestore_client_t* client, plist_t build_identit
 	idevice_t device = NULL;
 	restored_client_t restore = NULL;
 	restored_error_t restore_error = RESTORE_E_SUCCESS;
+	rproxy_client_t rproxy_client = NULL;
 
 	restore_finished = 0;
 
@@ -1809,10 +1811,18 @@ int restore_device(struct idevicerestore_client_t* client, plist_t build_identit
 	/* this is mandatory on iOS 7+ to allow restore from normal mode */
 	plist_dict_set_item(opts, "PersonalizedDuringPreflight", plist_new_bool(1));
 
+	// start the reverse socks proxy
+	if (rproxy_start(device, &rproxy_client) < 0) {
+		error("ERROR: Unable to start the socks proxy\n");
+		plist_free(opts);
+		restore_client_free(client);
+		return -1;
+	}
 	// start the restore process
 	restore_error = restored_start_restore(restore, opts, client->restore->protocol_version);
 	if (restore_error != RESTORE_E_SUCCESS) {
 		error("ERROR: Unable to start the restore process\n");
+		rproxy_stop(rproxy_client);
 		plist_free(opts);
 		restore_client_free(client);
 		return -1;
@@ -1896,6 +1906,9 @@ int restore_device(struct idevicerestore_client_t* client, plist_t build_identit
 		message = NULL;
 	}
 
+	if (0 != rproxy_stop(rproxy_client)) {
+		error("ERROR: Failed to stop the reverse proxy\n");
+	}
 	restore_client_free(client);
 	return err;
 }
