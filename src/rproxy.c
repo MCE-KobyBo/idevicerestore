@@ -62,12 +62,83 @@ typedef struct
 	struct event_base * ev_base;
 } control_thread_context_t;
 
+/* TODO: Move idevice_connection_send_all\idevice_connection_receive_all to libimobiledevice? */
+static idevice_error_t idevice_connection_send_all(idevice_connection_t connection, const char * data, uint32_t length)
+{
+	size_t cur_bytes_sent = 0;
+	size_t total_bytes_sent = 0;
+	size_t bytes_left = length;
+	idevice_error_t res = IDEVICE_E_SUCCESS;
+
+	while (total_bytes_sent < length) {
+		res = idevice_connection_send(connection, data + total_bytes_sent, bytes_left, &cur_bytes_sent);
+		if (IDEVICE_E_SUCCESS != res) {
+			error("ERROR: Unable to send data\n");
+			break;
+		}
+
+		total_bytes_sent += cur_bytes_sent;
+		bytes_left -= cur_bytes_sent;
+	}
+
+	return res;
+}
+
+static uint64_t get_time_ms()
+{
+#ifdef WIN32
+	return (uint64_t)GetTickCount();
+#else
+	/* TODO: use clock_gettime (CLOCK_MONOTONIC) when possible */
+	struct timeval tv;
+	if (0 != gettimeofday(&tv, NULL)) {
+		return 0;
+	}
+
+	return ((tv.tv_sec * (uint64_t)1000) + (uint64_t)tv.tv_usec);
+#endif
+}
+
+static idevice_error_t idevice_connection_receive_all(idevice_connection_t connection, char * data, uint32_t length, unsigned int timeout)
+{
+	size_t cur_bytes_received = 0;
+	size_t total_bytes_received = 0;
+	size_t bytes_left = length;
+	idevice_error_t res = IDEVICE_E_SUCCESS;
+
+	uint64_t start_time = get_time_ms();
+	uint64_t time_passed = 0;
+	while ((total_bytes_received < length) && (time_passed <= timeout)) {
+		res = idevice_connection_receive_timeout(connection, 
+												 data + total_bytes_received, 
+												 bytes_left, 
+												 &cur_bytes_received, 
+												 timeout - (unsigned int)time_passed);
+		if (IDEVICE_E_SUCCESS != res) {
+			error("ERROR: Unable to receive data\n");
+			break;
+		}
+
+		total_bytes_received += cur_bytes_received;
+		bytes_left -= cur_bytes_received;
+
+		time_passed = get_time_ms() - start_time;
+	}
+	
+	/* Check if we've failed to receive the requested amount of data */
+	if ((IDEVICE_E_SUCCESS == res) && (total_bytes_received < length)) {
+		/* Timeout */
+		return IDEVICE_E_NOT_ENOUGH_DATA;
+	}
+
+	return res;
+}
+
 static int rproxy_send_dict(idevice_connection_t connection, plist_t dict)
 {
 	int res = -1;
 	char * content = NULL;
 	uint32_t length = 0;
-	uint32_t bytes_sent = 0;
 
 	/* Convert dict to a binary plist buffer */
 	plist_to_bin(dict, &content, &length);
@@ -76,21 +147,14 @@ static int rproxy_send_dict(idevice_connection_t connection, plist_t dict)
 	}
 
 	/* Send the size of the plist buffer */
-	if (IDEVICE_E_SUCCESS != idevice_connection_send(connection, (const char *)&length, sizeof(length), &bytes_sent)) {
-		goto cleanup;
-	}
-	if (sizeof(length) != bytes_sent) {
+	if (IDEVICE_E_SUCCESS != idevice_connection_send_all(connection, (const char *)&length, sizeof(length))) {
 		goto cleanup;
 	}
 
-	/* Send the actual buffer.
-	 * TODO: "send all" */
-	if (IDEVICE_E_SUCCESS != idevice_connection_send(connection, content, length, &bytes_sent)) {
+	/* Send the actual buffer */
+	if (IDEVICE_E_SUCCESS != idevice_connection_send_all(connection, content, length)) {
 		goto cleanup;
 	} 
-	if (length != bytes_sent) {
-		goto cleanup;
-	}
 
 	res = 0;
 
@@ -101,24 +165,16 @@ cleanup:
 	return res; 
 }
 
-/* TODO: 
-* - implement receive_all 
-* - update the timeout before each call to receive
-*/
 static int rproxy_recv_dict(idevice_connection_t connection, plist_t * dict, unsigned int timeout)
 {
 	int res = -1;
 	char * content = NULL;
 	uint32_t dict_length = 0;
-	uint32_t bytes_read = 0;
 
 	/* Read the size of the plist buffer */
-	if (IDEVICE_E_SUCCESS != idevice_connection_receive_timeout(connection, (char *)&dict_length, sizeof(dict_length), (uint32_t*)&bytes_read, timeout)) {
+	if (IDEVICE_E_SUCCESS != idevice_connection_receive_all(connection, (char *)&dict_length, sizeof(dict_length), timeout)) {
 		goto cleanup;
 	} 
-	if (sizeof(dict_length) != bytes_read) {
-		goto cleanup;
-	}
 
 	/* Allocate a buffer for the plist */
 	content = (char*)malloc(dict_length);
@@ -127,12 +183,9 @@ static int rproxy_recv_dict(idevice_connection_t connection, plist_t * dict, uns
 	}
 
 	/* Read the plist */
-	if (IDEVICE_E_SUCCESS != idevice_connection_receive_timeout(connection, content, dict_length, (uint32_t*)&bytes_read, timeout)) {
+	if (IDEVICE_E_SUCCESS != idevice_connection_receive_all(connection, content, dict_length, timeout)) {
 		goto cleanup;
 	} 
-	if (dict_length != bytes_read) {
-		goto cleanup;
-	}
 
 	/* Finally, parse the plist */
 	plist_from_bin(content, dict_length, dict);
@@ -172,11 +225,7 @@ static int rproxy_create_connection(idevice_t device, uint16_t port, const char 
 
 	/* Send the start string, including the null terminator */
 	uint32_t msg_size = strlen(start_msg) + 1;
-	uint32_t bytes_sent = 0;
-	if (IDEVICE_E_SUCCESS != idevice_connection_send(new_connection, start_msg, msg_size, &bytes_sent)) {
-		goto cleanup;
-	}
-	if (msg_size != bytes_sent) {
+	if (IDEVICE_E_SUCCESS != idevice_connection_send_all(new_connection, start_msg, msg_size)) {
 		goto cleanup;
 	}
 
