@@ -1440,6 +1440,12 @@ int restore_send_baseband_data(restored_client_t restore, struct idevicerestore_
 
 		tss_parameters_add_from_manifest(parameters, build_identity);
 
+		/* FIXME: Read from device\ipsw? */
+		plist_dict_set_item(parameters, "ApProductionMode", plist_new_bool(1));
+		if (client->image4supported) {
+			plist_dict_set_item(parameters, "ApSecurityMode", plist_new_bool(1));
+		}
+
 		/* create baseband request */
 		plist_t request = tss_request_new(NULL);
 		if (request == NULL) {

@@ -617,6 +617,27 @@ int tss_request_add_baseband_tags(plist_t request, plist_t parameters, plist_t o
 	}
 	plist_dict_set_item(request, "BasebandFirmware", bbfwdict);
 
+	/* FIXME: Move ApSecurityMode & ApProductionMode to common tags? */
+	/* ApSecurityMode */
+	node = plist_dict_get_item(request, "ApSecurityMode");
+	if (!node) {
+		node = plist_dict_get_item(parameters, "ApSecurityMode");
+		if (node) {
+			plist_dict_set_item(request, "ApSecurityMode", plist_copy(node));
+			node = NULL;
+		}
+	}
+
+	/* ApProductionMode */
+	node = plist_dict_get_item(request, "ApProductionMode");
+	if (!node) {
+		node = plist_dict_get_item(parameters, "ApProductionMode");
+		if (node) {
+			plist_dict_set_item(request, "ApProductionMode", plist_copy(node));
+			node = NULL;
+		}
+	}
+
 	/* apply overrides */
 	if (overrides) {
 		plist_dict_merge(&request, overrides);
