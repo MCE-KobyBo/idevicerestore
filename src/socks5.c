@@ -103,9 +103,6 @@ static const char* inet_ntop(int af, const void* src, char* dst, int cnt)
  */
 int socks5_add_client_socket(struct event_base * base, idevice_connection_t client_connection)
 {
-	struct timeval tv;
-	struct socks5_conn * sconn = NULL;
-
 	/* Get the new connection's fd */
 	int client_fd = -1;
 	if (IDEVICE_E_SUCCESS != idevice_connection_get_fd(client_connection, &client_fd)) {
@@ -120,7 +117,7 @@ int socks5_add_client_socket(struct event_base * base, idevice_connection_t clie
 	}
 
 	/* Allocate a new client connection */
-	sconn = (struct socks5_conn*)malloc(sizeof(struct socks5_conn));
+	struct socks5_conn * sconn = (struct socks5_conn*)malloc(sizeof(struct socks5_conn));
 	if (!sconn) {
 		debug("ERROR: (%d) failed allocating socks5_conn\n", client_fd);
 		return -1;
@@ -129,6 +126,7 @@ int socks5_add_client_socket(struct event_base * base, idevice_connection_t clie
 
 	sconn->status = SCONN_INIT;
 
+	/* Initialize a new bufferevent for the connection */
 	sconn->client = bufferevent_socket_new(base, client_fd, 0);
 	if (!sconn->client) {
 		debug("ERROR: (%d) failed creating client bufferevent\n", client_fd);
@@ -140,6 +138,7 @@ int socks5_add_client_socket(struct event_base * base, idevice_connection_t clie
 
 	/* Set a read timeout so that clients that connect but don't send
 	 * anything are disconnected. */
+	struct timeval tv;
 	tv.tv_sec = SOCKS5_CLIENT_TIMEOUT;
 	tv.tv_usec = 0;
 	bufferevent_set_timeouts(sconn->client, &tv, NULL);
@@ -151,7 +150,7 @@ int socks5_add_client_socket(struct event_base * base, idevice_connection_t clie
 	}
 
 	/* Only set the client connection when we know everything when OK (so above calls to socks5_conn_free won't
-	* close the connection, and let the caller do it) */
+	 * close the connection, and let the caller do it) */
 	sconn->client_connection = client_connection;
 
 	return 0;
@@ -219,6 +218,7 @@ static int socks5_process_greeting(struct socks5_conn *sconn)
 
 	evbuffer_copyout(buffer, (void*)greeting, 1);
 
+	/* iOS (non standard) requests begin with 0xaabb */
 	if (0xaa == greeting[0]) {
 		if (have < 2) {
 			return 0;
@@ -337,8 +337,8 @@ static int socks5_process_auth(struct socks5_conn *sconn)
 		return -1;
 	}
 
-	/* Make sure we have enough data for the user name name - and read it (and 
-	 * the password length) */
+	/* Make sure we have enough data for the username - and read it (and 
+	 * the password length, since we've already counted it in size_needed) */
 	username_len = auth_req[SOCKS5_AUTH_USERNAME_LEN_OFFSET];
 	size_needed += username_len;
 	if (have < size_needed) {
@@ -366,7 +366,7 @@ static int socks5_process_auth(struct socks5_conn *sconn)
 		debug("(%d) auth request for: %.*s (empty passowrd)\n", socks5_conn_id(sconn), (int)username_len, username);
 	}
 	
-	/* Currently will allow any username\password */
+	/* Currently we'll allow any username\password */
 	auth_response.version = SOCKS5_AUTH_VERSION;
 	auth_response.status = SOCKS5_AUTH_STATUS_SUCCESS;
 	bufferevent_write(sconn->client, &auth_response, sizeof(auth_response));
@@ -391,7 +391,7 @@ static int socks5_client_send_plist(struct socks5_conn * sconn, plist_t dict)
 		goto cleanup;
 	}
 
-	/* Send a 4-byte dict size, followed by the dict buffer */
+	/* Send a 4-byte dict size, followed by the dict content */
 	if (0 != bufferevent_write(sconn->client, &length, sizeof(length))) {
 		goto cleanup;
 	} 
@@ -458,7 +458,7 @@ static int socks5_process_command_request(struct socks5_conn * sconn)
 	}
 	
 	plist_get_string_val(command_node, &command);
-	if (NULL == plist_get_string_val) {
+	if (NULL == command) {
 		debug("ERROR: (%d) Failed get command node value\n", socks5_conn_id(sconn));
 		goto cleanup;
 	}

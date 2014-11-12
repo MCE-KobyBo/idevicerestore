@@ -33,8 +33,8 @@
 
 #define REVERSE_PROXY_MUX_PORT (1082)
 
-#define RPROXY_CONTROL_PROTOCOL_VERSION ((uint64_t)2)
-#define RPROXY_CONNECTION_PROTOCOL_VERSION ((uint64_t)2)
+#define CONTROL_PROTOCOL_VERSION ((uint64_t)2)
+#define CONNECTION_PROTOCOL_VERSION ((uint64_t)2)
 
 #define RPROXY_RECV_TIMEOUT (10000)
 
@@ -45,7 +45,8 @@
 
 #define CONTROL_MSG_CONNECT (0x1)
 
-#define RPROXY_CONTROL_CONNTECTION_ATTEMPTS (5)
+#define CONTROL_CONNTECTION_ATTEMPTS (5)
+#define CONTROL_CONNTECTION_ATTEMPTS_INTERVAL (1)
 
 struct rproxy_client_private
 {
@@ -268,10 +269,10 @@ static int handle_connect_msg(control_thread_context_t * context)
 		error("ERROR: Invalid connection protocol plist\n");
 		goto cleanup;
 	}
-	if (RPROXY_CONNECTION_PROTOCOL_VERSION != conn_protocol_ver) {
+	if (CONNECTION_PROTOCOL_VERSION != conn_protocol_ver) {
 		error("WARNING: connection protocol mismatch (received "PRIu64", expected "PRIu64")", 
 			  conn_protocol_ver, 
-			  RPROXY_CONNECTION_PROTOCOL_VERSION);
+			  CONNECTION_PROTOCOL_VERSION);
 	}
 
 	/* FIXME: Check\Store the identifier? */
@@ -381,7 +382,7 @@ static int create_control_socket_event(struct event_base * base, control_thread_
 	bufferevent_set_timeouts(new_event, &read_timeout, NULL);
 
 	/* Each control message is a 32bit unsigned int, so tell libevent to call
-	 * our read callback only were there is enough data */
+	 * our read callback only when there is enough data */
 	bufferevent_setwatermark(new_event, EV_READ, sizeof(uint32_t), 0);
 
 	/* Enable both read & write events */
@@ -442,7 +443,7 @@ static int rproxy_connect_control_service(idevice_t device, idevice_connection_t
 	/* Send the BeginCtrl command */
 	dict = plist_new_dict();
 	plist_dict_set_item(dict, "Command", plist_new_string("BeginCtrl"));
-	plist_dict_set_item(dict, "CtrlProtoVersion", plist_new_uint(RPROXY_CONTROL_PROTOCOL_VERSION));
+	plist_dict_set_item(dict, "CtrlProtoVersion", plist_new_uint(CONTROL_PROTOCOL_VERSION));
 	
 	if (0 != rproxy_send_dict(new_connection, dict)) {
 		error("ERROR: Failed send BeginCtrl command to the service\n");
@@ -463,9 +464,9 @@ static int rproxy_connect_control_service(idevice_t device, idevice_connection_t
 		error("ERROR: Device response to BeginCtrl doesn't contain a protocol version\n");
 		goto cleanup;
 	}
-	if (RPROXY_CONTROL_PROTOCOL_VERSION != device_ctrl_proto_ver) {
+	if (CONTROL_PROTOCOL_VERSION != device_ctrl_proto_ver) {
 		error("ERROR: Proxy protocol version mismatch: expected "PRIu64", device reported "PRIu64"\n",
-			  RPROXY_CONTROL_PROTOCOL_VERSION, 
+			  CONTROL_PROTOCOL_VERSION, 
 			  device_ctrl_proto_ver);
 		goto cleanup;
 	}
@@ -547,17 +548,17 @@ int rproxy_start(idevice_t device, rproxy_client_t * client)
 	/* Connect to the proxy service */
 	uint16_t conn_port = 0;
 	int i = 0;
-	for (i = 1; i <= RPROXY_CONTROL_CONNTECTION_ATTEMPTS; i++) {
+	for (i = 1; i <= CONTROL_CONNTECTION_ATTEMPTS; i++) {
 		if (0 == rproxy_connect_control_service(device, &control_connection, &conn_port)) {
 			break;
 		}
 
-		if (RPROXY_CONTROL_CONNTECTION_ATTEMPTS == i) {
+		if (CONTROL_CONNTECTION_ATTEMPTS == i) {
 			error("ERROR: Failed to initialize reverse proxy connection\n");
 			goto cleanup;
 		}
 
-		sleep(1);
+		sleep(CONTROL_CONNTECTION_ATTEMPTS_INTERVAL);
 		debug("Failed to connect to the proxy, retrying...\n");
 	}
 
@@ -614,6 +615,10 @@ int rproxy_stop(rproxy_client_t client)
 
 	event_base_free(client->ev_base);
 	free(client);
+
+#ifdef WIN32
+	WSACleanup();
+#endif
 
 	return 0;
 }
