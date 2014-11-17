@@ -1649,6 +1649,18 @@ int restore_handle_data_request_msg(struct idevicerestore_client_t* client, idev
 				debug_plist(message);
 		}
 	}
+
+int is_fdr_supported(plist_t build_identity)
+{
+	uint8_t val = 0;
+	plist_t node = plist_access_path(build_identity, 2, "Info", "FDRSupport");
+	if (node) {
+		if (PLIST_BOOLEAN == plist_get_node_type(node)) {
+			plist_get_bool_val(node, &val);
+			return val;
+		}
+	}
+	
 	return 0;
 }
 
@@ -1818,12 +1830,16 @@ int restore_device(struct idevicerestore_client_t* client, plist_t build_identit
 	plist_dict_set_item(opts, "PersonalizedDuringPreflight", plist_new_bool(1));
 
 	// start the reverse socks proxy
-	if (rproxy_start(device, &rproxy_client) < 0) {
-		error("ERROR: Unable to start the socks proxy\n");
-		plist_free(opts);
-		restore_client_free(client);
-		return -1;
+	if (is_fdr_supported(build_identity)) {
+		debug("FDR is supported, starting reverse proxy\n");
+		if (rproxy_start(device, &rproxy_client) < 0) {
+			error("ERROR: Unable to start the socks proxy\n");
+			plist_free(opts);
+			restore_client_free(client);
+			return -1;
+		}
 	}
+
 	// start the restore process
 	restore_error = restored_start_restore(restore, opts, client->restore->protocol_version);
 	if (restore_error != RESTORE_E_SUCCESS) {
@@ -1912,8 +1928,10 @@ int restore_device(struct idevicerestore_client_t* client, plist_t build_identit
 		message = NULL;
 	}
 
-	if (0 != rproxy_stop(rproxy_client)) {
-		error("ERROR: Failed to stop the reverse proxy\n");
+	if (rproxy_client) {
+		if (0 != rproxy_stop(rproxy_client)) {
+			error("ERROR: Failed to stop the reverse proxy\n");
+		}
 	}
 	restore_client_free(client);
 	return err;
